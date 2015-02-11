@@ -34,6 +34,7 @@
 #define COM_TMOUT	100	// ms
 #define ONE_WAIT_ON	60  // s
 #define TEMP_PANIC  131 // F = 55C
+
 int OneSwitch(int);
 // -----   Global variables and types   ----- //
 
@@ -128,6 +129,9 @@ struct {
     int Num;        	// step device number
     time_t oneTime;	// The time one button operation was started
     OneStatus One;	// status and message
+    int SiAlarm[32];	// silicon previous alarm
+    int SRSAlarm[4];	// SRS previous alarm
+    int TermAlarm;	// Temperature previous alarm 
 } Run;
 
 DbStruct Db;
@@ -411,11 +415,16 @@ void AdamRead(int num)
         Db.si[i].current = GetAdamValue(Config.Plane[i].bias) * 10; // V -> uA on 100kOhm resistor
         Db.si[i].temp = GetAdamValue(Config.Plane[i].temp) * 100;   // The thermometer gives 10mV per F.
 		if (Db.si[i].temp > TEMP_PANIC) {
+    		if (Run.TermAlarm) {	// We need PANIC twice !!!
 			fprintf(Run.log, "Temperature panic !!!\n");
 			OneSwitch(0);
 			Run.One.status = ST_ALARM;
 			memset(Run.One.msg, 0, sizeof(Run.One.msg));
 			sprintf(Run.One.msg, "Temperature panic !!!");
+		    }
+		    Run.TermAlarm++;
+		} else {
+		    Run.TermAlarm = 0;
 		}
     }
 }
@@ -490,8 +499,12 @@ void BrdRead(int num)
                     Db.si[n].AVDD1 > Config.Limits.AVDD1.max  || Db.si[n].AVDD1 < Config.Limits.AVDD1.min || 
                     Db.si[n].AVDD2 > Config.Limits.AVDD2.max  || Db.si[n].AVDD2 < Config.Limits.AVDD2.min || 
                     Db.si[n].DVDD > Config.Limits.DVDD.max    || Db.si[n].DVDD < Config.Limits.DVDD.min || 
-                    Db.si[n].DPECL > Config.Limits.DPECL.max  || Db.si[n].DPECL < Config.Limits.DPECL.min)
-                    Db.si[n].status = ST_ALARM;
+                    Db.si[n].DPECL > Config.Limits.DPECL.max  || Db.si[n].DPECL < Config.Limits.DPECL.min) {
+                    if (Run.SiAlarm[n]) Db.si[n].status = ST_ALARM;		// Only two alarm insequence produce real alarm
+		    Run.SiAlarm[n]++;
+		} else {
+		    Run.SiAlarm[n] = 0;
+		}
             }
         }
     }
@@ -697,8 +710,11 @@ void SRSRead(int dev)
     } else Db.srs[dev].status = ST_POFF;
     
     if ((Db.srs[dev].status == ST_ON) && (Db.srs[dev].iout > Config.Limits.IBIAS.max || 
-        Db.srs[dev].vout > Config.Limits.VBIAS.max)) Db.srs[dev].status = ST_ALARM;
-
+        Db.srs[dev].vout > Config.Limits.VBIAS.max)) {
+	if (Run.SRSAlarm[dev]) Db.srs[dev].status = ST_ALARM;
+	Run.SRSAlarm[dev]++;
+    }
+    if (Db.srs[dev].status == ST_ON) Run.SRSAlarm[dev] = 0;
     if ((Db.srs[dev].status == ST_ON) && (Db.srs[dev].vset != Db.srs[dev].vtarg)) {
 	if (fabs(Db.srs[dev].vset - Db.srs[dev].vtarg) < Config.SRS[dev].vrate) {
 	    SRSSet(dev, Db.srs[dev].vtarg);
@@ -1118,10 +1134,12 @@ int OneStep(void)
     Db.maxstep = sizeof(STControl) / sizeof(STControl[0]);
     STControl[Run.Step].call(Run.Num);
     Run.Num++;
+//    printf("."); fflush(stdout);
     if (Run.Num >= STControl[Run.Step].maxcnt) {
         Run.Step++;
         if (Run.Step >= sizeof(STControl) / sizeof(STControl[0])) {
             Run.Step = 0;
+//	    printf("\n"); fflush(stdout);
             irc = 1;
         }
         Run.Num = STControl[Run.Step].startcnt;
@@ -1177,7 +1195,10 @@ int main(int argc, char **argv)
 	InitGpib();
 	SRSCheck();		// we need read SRSes to understand their status.
 	if (InitUdp() < 0) return 200;
-    
+	if (Run.log) {
+	    fprintf(Run.log, "Init done...\n");
+	    fflush(Run.log);
+	}
 	for (;;) {
 	    if (OneStep()) {
 	        if (Run.log) DoLog(Run.log);
