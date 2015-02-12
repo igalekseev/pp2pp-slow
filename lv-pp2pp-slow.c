@@ -90,7 +90,7 @@ int pps_UDP_Operate(UdpIn * cmd, char * buf, int size) {
     FD_ZERO(&set);
     FD_SET(Udp, &set);
     tout.tv_sec = 0;
-    tout.tv_usec = PPS_UDP_MSTOUT*3000;
+    tout.tv_usec = PPS_UDP_MSTOUT*5000;
     while ((( irc = select(FD_SETSIZE, &set, NULL, NULL, &tout)) < 0) && (errno == EINTR)) ;
     // 0 means timeout (bad command or real timeout because of server problems)
     // <0 is real error, should never happen

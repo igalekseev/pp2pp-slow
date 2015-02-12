@@ -32,7 +32,7 @@
 
 #define COM_RETRIES	5
 #define COM_TMOUT	100	// ms
-#define ONE_WAIT_ON	60  // s
+#define ONE_WAIT_ON	120  // s
 #define TEMP_PANIC  131 // F = 55C
 
 int OneSwitch(int);
