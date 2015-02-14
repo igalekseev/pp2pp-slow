@@ -756,10 +756,19 @@ void SRSCheck(void)
     for (i=0; i<COM_RETRIES; i++) {	// Retries
 	for (j=0; j<4; j++) {	// Cycle over SRS
 	    if (Db.srs[j].vtarg > 1) continue;	// This channel we already got. Bias below 1 V is not considered
-	    Db.srs[j].vtarg = SRSGetSet(j);
+	    Db.srs[j].vset = SRSGetSet(j);
+	    Db.srs[j].vtarg = Db.srs[j].vset;
 	}
     }
+    if (Run.log) {
+	fprintf(Run.log, "SRS check: VON = %6.1f %6.1f %6.1f %6.1f\n", Db.srs[0].vset, Db.srs[1].vset, Db.srs[2].vset, Db.srs[3].vset);
+	fflush(Run.log);
+    }
     for (j=0; j<4; j++) if (Db.srs[j].vtarg < 1) Db.srs[j].vtarg = Config.SRS[j].vset;
+    if (Run.log) {
+	fprintf(Run.log, "SRS check: VTARG = %6.1f %6.1f %6.1f %6.1f\n", Db.srs[0].vtarg, Db.srs[1].vtarg, Db.srs[2].vtarg, Db.srs[3].vtarg);
+	fflush(Run.log);
+    }
 }
 
 //  Switch On/off SRS num. what = 0 - off, others - on.
@@ -852,6 +861,22 @@ int APCSwitch(int num, int chan, int what) {
     rc = 2 - strtoul(ptr, NULL, 0); // Only OFF will give 0
     if (rc == what) return 1; 
     return 0;
+}
+
+//	initial check of one button status
+//	Check all required outlets and bias
+void OneInit(void)
+{
+    int mask, i;
+    Run.One.status = ST_OFF;
+    memset(Run.One.msg, 0, sizeof(Run.One.msg));
+    for (i=0; i<2; i++) {
+    	    APCRead(i);
+    	    mask = Config.One.APCrequired[i] | Config.One.APCswitch[i];
+    	    if ((Db.apc[i].swmask & mask) != Config.One.APCrequired[i]) return;
+    }
+    for (i=0; i<4; i++) if ((Config.One.SRSswitch & (1 << i)) && (Db.srs[i].vset < Config.SRS[i].vrate)) return;
+    Run.One.status = ST_ON;
 }
 
 //	One button on/off
@@ -1042,8 +1067,6 @@ void InitDb(void)
         Run.rs485[i] = -1;
     }
     for (i = 0; i < 4; i++) Run.gpib[i] = -1;
-	Run.One.status = ST_OFF;
-	memset(Run.One.msg, 0, sizeof(Run.One.msg));
 //      Db
     memset(&Db, 0, sizeof(Db));
     Db.len = sizeof(Db);
@@ -1188,12 +1211,21 @@ int main(int argc, char **argv)
 	InitDb();
 	if (ReadConfig((argc > 1) ? argv[1] : "/home/daq/bin/pp2pp-slow.conf") < 0) return 100;
 	if (Run.log) {
-	    fprintf(Run.log, "**** Starting the server...\n");
+	    fprintf(Run.log, "**** Starting the server. ");
 	    fflush(Run.log);
 	}
 	InitSerial();
+	if (Run.log) {
+	    fprintf(Run.log, "ADAM initialized. ");
+	    fflush(Run.log);
+	}
 	InitGpib();
+	if (Run.log) {
+	    fprintf(Run.log, "GPIB initialized. \n");
+	    fflush(Run.log);
+	}
 	SRSCheck();		// we need read SRSes to understand their status.
+	OneInit();		// understand real one button status
 	if (InitUdp() < 0) return 200;
 	if (Run.log) {
 	    fprintf(Run.log, "Init done...\n");
