@@ -635,7 +635,8 @@ int SRSCommand(int dev, char *cmd, char *buf, int blen)
     }
     if (Config.Debug > 80 && Run.log) {
 	fprintf(Run.log, "***** SRS reply: ");
-	for (i=0; i<ibcnt; i++) fprintf(Run.log, "%c", buf[i]);
+	for (i=0; i<ibcnt_s; i++) fprintf(Run.log, "%c", buf[i]);
+	fprintf(Run.log, "\n");
 	fflush(Run.log);
     }
     return ibcnt_s;
@@ -739,6 +740,7 @@ double SRSGetSet(int dev)
     if (irc < 0) return irc;
     if (irc == 0) return -10.0;
     buf[irc] = '\0';
+    printf("SRS: %s\n");
     val = strtod(buf, NULL);
     ptr = strchr(buf, ';');
     if (!ptr) return -20.0;
@@ -871,7 +873,6 @@ void OneInit(void)
     Run.One.status = ST_OFF;
     memset(Run.One.msg, 0, sizeof(Run.One.msg));
     for (i=0; i<2; i++) {
-    	    APCRead(i);
     	    mask = Config.One.APCrequired[i] | Config.One.APCswitch[i];
     	    if ((Db.apc[i].swmask & mask) != Config.One.APCrequired[i]) return;
     }
@@ -1207,6 +1208,7 @@ void CloseAll(void)
 //	This is the main... 
 int main(int argc, char **argv)
 {    
+    int i;
     for(;;) {
 	InitDb();
 	if (ReadConfig((argc > 1) ? argv[1] : "/home/daq/bin/pp2pp-slow.conf") < 0) return 100;
@@ -1214,6 +1216,7 @@ int main(int argc, char **argv)
 	    fprintf(Run.log, "**** Starting the server. ");
 	    fflush(Run.log);
 	}
+    	for (i=0; i<2; i++) APCRead(i);	// We need check APC before anything else !
 	InitSerial();
 	if (Run.log) {
 	    fprintf(Run.log, "ADAM initialized. ");
