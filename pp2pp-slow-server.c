@@ -933,6 +933,7 @@ void OneCheck(void)
 {
 	int i;
 	if (Run.One.status == ST_RAMP && time(NULL) - Run.oneTime > ONE_WAIT_ON) Run.One.status = ST_ON;
+	if (Run.One.status == ST_ALARM) Run.One.status = ST_ON;	// try ON - may be alarm is gone.
 	if (Run.One.status == ST_ON) {
 		memset(Run.One.msg, 0, sizeof(Run.One.msg));
 		for (i=0; i<4; i++) if ((Config.One.SRSswitch & (1 << i)) && (Db.srs[i].status == ST_ALARM || Db.srs[i].status == ST_TRIP)) {
@@ -943,7 +944,11 @@ void OneCheck(void)
 			sprintf(&Run.One.msg[strlen(Run.One.msg)], "Brd %d. ", i);
 			Run.One.status = ST_ALARM;
 		}
-		if (Run.One.status == ST_ALARM) sprintf(&Run.One.msg[strlen(Run.One.msg)], "- Listed device(s) are in bad status. Call expert or try OFF/ON no more than once.");
+		if (Run.One.status == ST_ALARM) {
+			sprintf(&Run.One.msg[strlen(Run.One.msg)], "- Listed device(s) are in bad status. Call expert or try OFF/ON no more than once.");
+		} else {
+			memset(Run.One.msg, 0, sizeof(Run.One.msg));	// clear message for good status
+		}
 	}
 }
 
