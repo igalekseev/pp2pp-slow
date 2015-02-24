@@ -63,7 +63,10 @@ typedef struct {
 
 //	Data we got from the configuration
 struct {
-    char LogFile[1024];	// Path to log file
+    char LogFile[1024];	    // Path to log file
+    char SndDev[1024];      // Sound device name
+    char SndAlarm[1024];    // Path to alaSrm sound
+    char SndState[1024];    // Path to state change sound
     int Debug;
     SRSConf SRS[4];	// Bias power modules
     struct {
@@ -597,6 +600,13 @@ void SRS2Log(FILE *f)
     for(i=0; i<4; i++) fprintf(f, "%d: %5s SET=%4.0fV V=%4.0fV I=%5.0fuA ", 
         i, St2String(Db.srs[i].status), Db.srs[i].vset, Db.srs[i].vout, Db.srs[i].iout);
     fprintf(f, "\n");
+
+    FILE *fepic = fopen("ToEPICS_HV.txt", "wt") ;
+    for(i=0; i<4; i++) fprintf(fepic, "   %d %4.0f %5.0f   ", 
+        Db.srs[i].status, Db.srs[i].vout, Db.srs[i].iout);
+    fprintf(fepic, "\n");
+    fclose(fepic) ;
+
 }
 
 //  Send command via GPIB and get the result
@@ -865,6 +875,15 @@ int APCSwitch(int num, int chan, int what) {
     return 0;
 }
 
+//	Play sound
+void PlaySound(char *snd)
+{
+	char str[4096];
+	if (!strlen(snd)) return;	// nothing to do
+	sprintf(str, "export AUDIODEV=%s;play -q %s&", Config.SndDev, snd);
+	system(str);
+}
+
 //	initial check of one button status
 //	Check all required outlets and bias
 void OneInit(void)
@@ -887,6 +906,7 @@ int OneSwitch(int what)
 	memset(Run.One.msg, 0, sizeof(Run.One.msg));
     if (what && Run.One.status == ST_OFF) {
 //	Check prerequired
+	j = 0;
     	for (i=0; i<2; i++) {
     	    APCRead(i);
     	    if ((Db.apc[i].swmask & Config.One.APCrequired[i]) != Config.One.APCrequired[i]) {
@@ -896,10 +916,13 @@ int OneSwitch(int what)
 				sprintf(&Run.One.msg[strlen(Run.One.msg)], 
 					"Some of the required APC %s channels are off. Go to APC web-page at %s or call expert. ",
 					(i) ? "West" : "East", Config.APCaddr[i]);
-				Run.One.status = ST_ALARM;
+				j++;
 			}
         }
-		if (Run.One.status == ST_ALARM) return 1;
+		if (j) {
+			PlaySound(Config.SndAlarm);
+			return 1;	// keep OFF status in this case
+		}
 //	Switch everything on
 		for (i=0; i<2; i++) for (j=0; j<8; j++) if ((Config.One.APCswitch[i] & (1 << j)) && (APCSwitch(i, j+1, 1) != 1)) {
 			fprintf(Run.log, "One button: switch of APC %s outlet %d failed.\n", (i) ? "West" : "East", j+1);
@@ -909,20 +932,26 @@ int OneSwitch(int what)
 				(i) ? "West" : "East", j+1);
 			Run.One.status = ST_ALARM;
 		}
-		if (Run.One.status == ST_ALARM) return 2;
+		if (Run.One.status == ST_ALARM) {
+			PlaySound(Config.SndAlarm);
+			return 2;
+		}
 		for (i=0; i<4; i++) if (Config.One.SRSswitch & (1 << i)) for (j=0; j<COM_RETRIES; j++) if (!SRSSwitch(i, 1)) break;
 		Run.One.status = ST_RAMP;
 		Run.oneTime = time(NULL);
 		fprintf(Run.log, "One button: switching on ...\n");
+		PlaySound(Config.SndState);
 		fflush(Run.log);
     } else if (what && Run.One.status == ST_ALARM) {
 		sprintf(Run.One.msg, "Press OFF before the next attepmt.");
+		PlaySound(Config.SndAlarm);
 		return 3;
 	} else if (!what) {
 		for (i=0; i<2; i++) for (j=0; j<8; j++) if (Config.One.APCswitch[i] & (1 << j)) APCSwitch(i, j+1, 0);
 		for (i=0; i<4; i++) if (Config.One.SRSswitch & (1 << i)) for (j=0; j<COM_RETRIES; j++) if (!SRSSwitch(i, 0)) break;
 		fprintf(Run.log, "One button: switching off ...\n");
 		fflush(Run.log);
+		PlaySound(Config.SndState);
 		Run.One.status = ST_OFF;
 	}
     return 0;
@@ -932,7 +961,10 @@ int OneSwitch(int what)
 void OneCheck(void)
 {
 	int i;
-	if (Run.One.status == ST_RAMP && time(NULL) - Run.oneTime > ONE_WAIT_ON) Run.One.status = ST_ON;
+	if (Run.One.status == ST_RAMP && time(NULL) - Run.oneTime > ONE_WAIT_ON) {
+		PlaySound(Config.SndState);
+		Run.One.status = ST_ON;
+	}
 	if (Run.One.status == ST_ALARM) Run.One.status = ST_ON;	// try ON - may be alarm is gone.
 	if (Run.One.status == ST_ON) {
 		memset(Run.One.msg, 0, sizeof(Run.One.msg));
@@ -950,6 +982,7 @@ void OneCheck(void)
 			memset(Run.One.msg, 0, sizeof(Run.One.msg));	// clear message for good status
 		}
 	}
+	if (Run.One.status == ST_ALARM) PlaySound(Config.SndAlarm);
 }
 
 // -----   General top level functions   ----- //
@@ -980,6 +1013,10 @@ int ReadConfig(char *confname)
             Run.log = stdout;
         }
     }
+//	Sounds
+    strncpy(Config.SndDev, config_lookup_string(&cnf, "Sound.Device", (const char **)&stmp) ? stmp : "", sizeof(Config.SndDev));
+    strncpy(Config.SndAlarm, config_lookup_string(&cnf, "Sound.Alarm", (const char **)&stmp) ? stmp : "", sizeof(Config.SndAlarm));
+    strncpy(Config.SndState, config_lookup_string(&cnf, "Sound.State", (const char **)&stmp) ? stmp : "", sizeof(Config.SndState));
     Config.Debug = config_lookup_int(&cnf, "Debug", &tmp) ? tmp : 0;
 //	SRS gpib
     for (i=0; i<4; i++) {
