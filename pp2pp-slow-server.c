@@ -918,7 +918,7 @@ int OneSwitch(int what)
 					(i) ? "West" : "East", Config.APCaddr[i]);
 				j++;
 			}
-        }
+	        }
 		if (j) {
 			PlaySound(Config.SndAlarm);
 			return 1;	// keep OFF status in this case
@@ -961,6 +961,7 @@ int OneSwitch(int what)
 void OneCheck(void)
 {
 	int i;
+	int mask;
 	if (Run.One.status == ST_RAMP && time(NULL) - Run.oneTime > ONE_WAIT_ON) {
 		PlaySound(Config.SndState);
 		Run.One.status = ST_ON;
@@ -968,14 +969,25 @@ void OneCheck(void)
 	if (Run.One.status == ST_ALARM) Run.One.status = ST_ON;	// try ON - may be alarm is gone.
 	if (Run.One.status == ST_ON) {
 		memset(Run.One.msg, 0, sizeof(Run.One.msg));
+		// Check APC
+		for (i=0; i<2; i++) {
+			mask = Config.One.APCrequired[i] | Config.One.APCswitch[i];
+    	    		if ((Db.apc[i].swmask & mask) != mask) {
+				sprintf(&Run.One.msg[strlen(Run.One.msg)], "APC %s. ", (i) ? "West" : "East");
+				Run.One.status = ST_ALARM;	
+			}
+		}
+		// Check SRS
 		for (i=0; i<4; i++) if ((Config.One.SRSswitch & (1 << i)) && (Db.srs[i].status == ST_ALARM || Db.srs[i].status == ST_TRIP)) {
 			sprintf(&Run.One.msg[strlen(Run.One.msg)], "SRS %d. ", i);
 			Run.One.status = ST_ALARM;
 		}
+		// Check LV
 		for (i=0; i<32; i++) if (!(Config.One.SiIgnore & (1 << i)) && Db.si[i].status == ST_ALARM) {
 			sprintf(&Run.One.msg[strlen(Run.One.msg)], "Brd %d. ", i);
 			Run.One.status = ST_ALARM;
 		}
+		// Check the result
 		if (Run.One.status == ST_ALARM) {
 			sprintf(&Run.One.msg[strlen(Run.One.msg)], "- Listed device(s) are in bad status. Call expert or try OFF/ON no more than once.");
 		} else {
